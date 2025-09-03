@@ -1,11 +1,10 @@
 {
   "name": "svetserialu-addon",
-  "version": "2.4.0",
-  "description": "Stremio addon pro České seriály s anti-bot ochranou",
-  "main": "test-server.js",
+  "version": "2.5.1",
   "scripts": {
     "start": "node test-server.js",
-    "dev": "NODE_ENV=development node test-server.js"
+    "dev": "NODE_ENV=development node test-server.js",
+    "postinstall": "echo 'Chrome should be installed via Dockerfile'"
   },
   "engines": {
     "node": ">=18.0.0"
