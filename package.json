@@ -1,0 +1,21 @@
+{
+  "name": "svetserialu-addon",
+  "version": "2.4.0",
+  "description": "Stremio addon pro České seriály",
+  "main": "test-server.js",
+  "scripts": {
+    "start": "node test-server.js",
+    "dev": "NODE_ENV=development node test-server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "stremio-addon-sdk": "^1.6.8",
+    "node-fetch": "^2.7.0",
+    "dotenv": "^16.3.1",
+    "jsdom": "^22.1.0",
+    "tough-cookie": "^4.1.1",
+    "playwright": "^1.37.0"
+  }
+}
