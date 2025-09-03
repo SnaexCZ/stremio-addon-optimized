@@ -1,13 +1,14 @@
-// utils/auth.js - KOMPLETNÍ verze se všemi funkcemi
+// utils/auth.js - STEALTH AUTH s anti-bot ochranou
 
 const fetchBase = require('node-fetch');
 const ToughCookie = require('tough-cookie');
 const { JSDOM } = require('jsdom');
+const { createStealthPage, humanDelay, humanScroll } = require('../scraper/stealth');
 
 const SV_BASE = process.env.SVETSERIALU_BASE || 'https://svetserialu.io';
 const SV_EMAIL = process.env.SVETSERIALU_LOGIN_EMAIL || '';
 const SV_PASS = process.env.SVETSERIALU_LOGIN_PASSWORD || '';
-const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 const jar = new ToughCookie.CookieJar();
 
@@ -30,7 +31,7 @@ async function fetchHtml(url, ref) {
             'User-Agent': UA,
             'Referer': ref || SV_BASE,
             'Accept': 'text/html,*/*',
-            'Accept-Language': 'cs,en;q=0.9',
+            'Accept-Language': 'cs-CZ,cs;q=0.9,en;q=0.8',
             'Cache-Control': 'no-cache'
         }
     });
@@ -59,100 +60,272 @@ async function getPlaywrightCookiesFor(urlStr) {
     });
 }
 
+// ✅ STEALTH LOGIN - obchází anti-bot ochranu
 async function svLogin() {
     if (!SV_EMAIL || !SV_PASS) {
-        console.warn('SV login: chybí přihlašovací údaje (.env)');
+        console.warn('⚠️ SV login: chybí přihlašovací údaje (.env)');
         return false;
     }
+
     try {
-        const fragUrl = `${SV_BASE}/user/login#calloutthis`;
-        const fragHtml = await fetchHtml(fragUrl, SV_BASE);
-        const doc = new JSDOM(fragHtml).window.document;
-        const form = doc.querySelector('form');
-        if (!form) {
-            console.warn('LOGIN: ve fragmentu není <form>');
-            return false;
-        }
-        const actionUrl = new URL(form.getAttribute('action') || '/user/login', SV_BASE).toString();
-        const inputs = Array.from(form.querySelectorAll('input'));
-        const params = new URLSearchParams();
-        let emailKey = null;
-        let passKey = null;
-        for (const inp of inputs) {
-            const name = inp.getAttribute('name');
-            if (!name) continue;
-            const type = (inp.getAttribute('type') || '').toLowerCase();
-            const lname = name.toLowerCase();
-            let val = inp.getAttribute('value') || '';
-            if (!emailKey && (lname.includes('mail') || lname === 'login' || lname === 'email' || lname.includes('user'))) {
-                emailKey = name; val = SV_EMAIL;
-            } else if (!passKey && (lname.includes('pass') || type === 'password')) {
-                passKey = name; val = SV_PASS;
-            }
-            params.set(name, val);
-        }
-        if (!emailKey) params.set('email', SV_EMAIL);
-        if (!passKey) params.set('password', SV_PASS);
-        const res = await withCookies(actionUrl, {
-            method: 'POST',
-            headers: {
-                'User-Agent': UA,
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Referer': fragUrl
-            },
-            body: params.toString(),
-            redirect: 'manual'
+        console.log('🥷 Starting STEALTH login to SvetSerialu...');
+        
+        const page = await createStealthPage();
+        
+        // Nejdříve navštív hlavní stránku pro získání session
+        console.log('🥷 Visiting homepage first...');
+        await page.goto(SV_BASE, { 
+            waitUntil: 'networkidle2',
+            timeout: 30000 
         });
-        if (![200, 302, 303].includes(res.status)) {
-            console.warn('LOGIN unexpected status:', res.status);
+        
+        await humanDelay(2000, 4000);
+        await humanScroll(page);
+        
+        // Jdi na login stránku
+        console.log('🥷 Navigating to login page...');
+        const loginUrl = `${SV_BASE}/user/login`;
+        await page.goto(loginUrl, {
+            waitUntil: 'networkidle2',
+            timeout: 30000
+        });
+        
+        await humanDelay(3000, 5000);
+        
+        // Najdi login formulář
+        const emailSelector = 'input[name*="email"], input[type="email"], input[name*="mail"]';
+        const passwordSelector = 'input[name*="password"], input[type="password"], input[name*="pass"]';
+        
+        try {
+            await page.waitForSelector(emailSelector, { timeout: 10000 });
+            console.log('🥷 Login form found');
+        } catch (e) {
+            console.error('❌ Login form not found');
+            await page.close();
             return false;
         }
-        const afterHtml = await fetchHtml(SV_BASE, SV_BASE);
-        const hasUser = !!new JSDOM(afterHtml).window.document.querySelector('.user_actions, .user-actions, a[href*="logout"], a[href*="odhl"]');
-        console.log('LOGIN verify:', hasUser ? 'OK' : 'NEJISTÉ');
-        return true;
+        
+        // Vyplň email s lidským tempem
+        await page.click(emailSelector);
+        await humanDelay(500, 1000);
+        await page.type(emailSelector, SV_EMAIL, { delay: 120 });
+        
+        await humanDelay(1000, 2000);
+        
+        // Vyplň heslo
+        await page.click(passwordSelector);
+        await humanDelay(500, 1000);
+        await page.type(passwordSelector, SV_PASS, { delay: 100 });
+        
+        await humanDelay(2000, 3000);
+        
+        // Submit formulář
+        console.log('🥷 Submitting login form...');
+        
+        const submitSelectors = [
+            'input[type="submit"]',
+            'button[type="submit"]',
+            'button:has-text("Přihlásit")',
+            'button:has-text("Login")',
+            '[value*="přihlás"]'
+        ];
+        
+        let submitted = false;
+        for (const selector of submitSelectors) {
+            try {
+                const element = await page.$(selector);
+                if (element) {
+                    await element.click();
+                    submitted = true;
+                    console.log(`🥷 Clicked submit: ${selector}`);
+                    break;
+                }
+            } catch (e) {
+                continue;
+            }
+        }
+        
+        if (!submitted) {
+            console.log('🥷 Trying Enter key...');
+            await page.keyboard.press('Enter');
+        }
+        
+        // Čekej na redirect nebo response
+        try {
+            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
+        } catch (e) {
+            console.log('⚠️ Navigation timeout, checking current status...');
+        }
+        
+        await humanDelay(2000, 3000);
+        
+        // Zkontroluj úspěch loginu
+        const currentUrl = page.url();
+        const pageContent = await page.content();
+        
+        const isLoggedIn = !currentUrl.includes('/user/login') && 
+                          (pageContent.includes('logout') || 
+                           pageContent.includes('odhlás') ||
+                           pageContent.includes('profil') ||
+                           !pageContent.includes('přihlášení'));
+        
+        if (isLoggedIn) {
+            // Získej cookies
+            const cookies = await page.cookies();
+            
+            // Přenos cookies do fetch session
+            let cookieCount = 0;
+            for (const cookie of cookies) {
+                try {
+                    await new Promise(resolve => {
+                        const cookieString = `${cookie.name}=${cookie.value}; Domain=${cookie.domain}; Path=${cookie.path}`;
+                        jar.setCookie(cookieString, `https://${cookie.domain}`, () => resolve());
+                    });
+                    cookieCount++;
+                } catch (e) {
+                    console.warn(`⚠️ Failed to set cookie: ${cookie.name}`);
+                }
+            }
+            
+            console.log(`✅ STEALTH LOGIN SUCCESSFUL - transferred ${cookieCount} cookies`);
+            await page.close();
+            return true;
+        } else {
+            console.error('❌ STEALTH LOGIN FAILED - still on login page or error detected');
+            console.log(`Current URL: ${currentUrl}`);
+            await page.close();
+            return false;
+        }
+        
     } catch (e) {
-        console.error('LOGIN error:', e.message);
+        console.error('❌ STEALTH LOGIN ERROR:', e.message);
         return false;
+    }
+}
+
+// ✅ STEALTH SEARCH - obchází anti-bot ochranu
+async function findSlugOnSvetserialu(title) {
+    try {
+        console.log(`🥷 STEALTH search for: "${title}"`);
+        
+        const page = await createStealthPage();
+        
+        const searchUrl = `${SV_BASE}/?searchfor=${encodeURIComponent(title)}`;
+        console.log(`🥷 Search URL: ${searchUrl}`);
+        
+        await page.goto(searchUrl, { 
+            waitUntil: 'networkidle2',
+            timeout: 30000 
+        });
+        
+        await humanDelay(2000, 4000);
+        await humanScroll(page);
+        
+        // Extrahuj linky na seriály
+        const serialLinks = await page.evaluate(() => {
+            const anchors = Array.from(document.querySelectorAll('a[href*="/serial/"]'));
+            return anchors.map(a => ({
+                href: a.getAttribute('href'),
+                text: (a.textContent || '').trim()
+            })).filter(link => link.href && link.text);
+        });
+        
+        await page.close();
+        
+        console.log(`🥷 STEALTH search found ${serialLinks.length} results`);
+        
+        if (serialLinks.length === 0) {
+            console.warn(`❌ No results found for: "${title}"`);
+            return null;
+        }
+        
+        // Najdi nejlepší match
+        const titleLower = title.toLowerCase();
+        
+        // Nejdříve hledej přesnou shodu
+        for (const link of serialLinks) {
+            const linkTextLower = link.text.toLowerCase();
+            if (linkTextLower === titleLower) {
+                const match = link.href.match(/\/serial\/([^\/?#]+)/i);
+                if (match) {
+                    console.log(`✅ STEALTH search EXACT match: "${link.text}" -> ${match[1]}`);
+                    return match[1];
+                }
+            }
+        }
+        
+        // Pak hledej částečnou shodu
+        for (const link of serialLinks) {
+            const linkTextLower = link.text.toLowerCase();
+            if (linkTextLower.includes(titleLower) || titleLower.includes(linkTextLower)) {
+                const match = link.href.match(/\/serial\/([^\/?#]+)/i);
+                if (match) {
+                    console.log(`📍 STEALTH search PARTIAL match: "${link.text}" -> ${match[1]}`);
+                    return match[1];
+                }
+            }
+        }
+        
+        // Fallback na první výsledek
+        const firstMatch = serialLinks[0].href?.match(/\/serial\/([^\/?#]+)/i);
+        if (firstMatch) {
+            console.log(`🎯 STEALTH search FALLBACK: "${serialLinks[0].text}" -> ${firstMatch[1]}`);
+            return firstMatch[1];
+        }
+        
+        console.warn(`❌ No suitable match found for: "${title}"`);
+        return null;
+        
+    } catch (e) {
+        console.error('❌ STEALTH SEARCH ERROR:', e.message);
+        return null;
     }
 }
 
 async function getTitleFromImdb(imdbId) {
     try {
+        console.log(`📽️ Fetching title for ${imdbId}`);
         const html = await fetchHtml(`https://www.imdb.com/title/${imdbId}/`, 'https://www.imdb.com/');
-        const ld = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/i);
-        if (ld) {
+        
+        // Zkus najít JSON-LD data
+        const ldMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/i);
+        if (ldMatch) {
             try {
-                const j = JSON.parse(ld[1]);
-                if (j && j.name) return String(j.name).trim();
-            } catch {}
+                const jsonData = JSON.parse(ldMatch[1]);
+                if (jsonData && jsonData.name) {
+                    let title = String(jsonData.name).trim();
+                    console.log(`📽️ Title from JSON-LD: "${title}"`);
+                    return title;
+                }
+            } catch (e) {
+                console.log('⚠️ JSON-LD parsing failed:', e.message);
+            }
         }
-        const m = html.match(/<title>([^<]+)<\/title>/i);
-        if (m) return m[1].replace(/\s*\(\d{4}\)\s*-.*$/, '').trim();
-    } catch (e) {
-        console.warn('IMDb title fetch error:', e.message);
-    }
-    return null;
-}
-
-async function findSlugOnSvetserialu(title) {
-    try {
-        const html = await fetchHtml(`${SV_BASE}/?searchfor=${encodeURIComponent(title)}`, SV_BASE);
-        const doc = new JSDOM(html).window.document;
-        const anchors = Array.from(doc.querySelectorAll('a[href*="/serial/"]'));
-        let best = null;
-        for (const a of anchors) {
-            const href = a.getAttribute('href') || '';
-            const m = href.match(/\/serial\/([^\/?#]+)/i);
-            if (!m) continue;
-            const slug = m[1];
-            const txt = (a.textContent || '').trim();
-            if (txt && txt.toLowerCase() === title.toLowerCase()) return slug;
-            if (!best) best = slug;
+        
+        // Fallback: parsuj z <title> tagu
+        const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+        if (titleMatch) {
+            let title = titleMatch[1].trim();
+            console.log(`📽️ Raw title from <title>: "${title}"`);
+            
+            // Vyčisti název - odstraň vše za prvním "("
+            title = title.split('(')[0].trim();
+            
+            // Odstraň " - IMDb" na konci
+            title = title.replace(/\s*-\s*IMDb\s*$/i, '').trim();
+            
+            console.log(`📽️ Cleaned title: "${title}"`);
+            
+            if (title && title.length > 0) {
+                return title;
+            }
         }
-        return best;
+        
+        console.warn(`⚠️ No title found for ${imdbId}`);
+        return null;
+        
     } catch (e) {
-        console.warn('findSlug error:', e.message);
+        console.error('❌ IMDb fetch error:', e.message);
         return null;
     }
 }

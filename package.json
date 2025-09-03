@@ -1,7 +1,7 @@
 {
   "name": "svetserialu-addon",
   "version": "2.4.0",
-  "description": "Stremio addon pro České seriály",
+  "description": "Stremio addon pro České seriály s anti-bot ochranou",
   "main": "test-server.js",
   "scripts": {
     "start": "node test-server.js",
@@ -16,6 +16,9 @@
     "dotenv": "^16.3.1",
     "jsdom": "^22.1.0",
     "tough-cookie": "^4.1.1",
-    "playwright": "^1.37.0"
+    "playwright": "^1.37.0",
+    "puppeteer": "^21.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   }
 }
